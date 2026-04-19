@@ -52,7 +52,14 @@ module.exports = {
         try {
             const chatSession = ai.chats.create({
                 model: process.env.DEFAULT_MODEL || 'gemini-3.1-flash-lite-preview',
-                config: { systemInstruction: systemPrompt },
+                config: { 
+                    systemInstruction: systemPrompt, 
+                    tools: [
+                        {
+                            googleSearch: { }
+                        }
+                    ]
+                },
                 history,
             });
 
@@ -73,7 +80,7 @@ module.exports = {
                 await msg.channel.send(sends[i]);
             }
         } catch (err) {
-            if(err.message?.includes("429")) {
+            if(err.message?.includes("429") || err.message?.includes("503")) {
                 await msg.reply(`逼逼! 能量飲料耗光了...`);
                 return;
             }
