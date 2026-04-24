@@ -5,7 +5,7 @@ const fs = require('fs');
 const func = require('../utility/functions');
 const system = require('../utility/system');
 
-const MAX_DEPTH = 20;
+const MAX_DEPTH = 200;
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 async function buildHistory(channel, referenceId, botId, depth) {
