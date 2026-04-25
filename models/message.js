@@ -36,11 +36,31 @@ module.exports = {
         if(msg.channel.permissionsFor(client.user).has(Discord.PermissionsBitField.Flags.SendMessages) === false) return;
 
         const prompt = msg.content.replace(/<@!?\d+>/g, '').trim();
-        if (!prompt) return;
+
+        // 取得第一張圖片或附件
+        const imageAttachment = msg.attachments.find(a => a.contentType?.startsWith('image/'));
+        if (!prompt && !imageAttachment) return;
 
         console.log(`message command, from: ${msg.guild?.name ?? 'DM'}, user: ${msg.author.tag} (ID: ${msg.author.id})`);
 
         await msg.channel.sendTyping();
+
+        // 若有圖片，下載並轉為 base64 inline data
+        let imagePart = null;
+        if (imageAttachment) {
+            try {
+                const res = await fetch(imageAttachment.url);
+                const buffer = await res.arrayBuffer();
+                imagePart = {
+                    inlineData: {
+                        mimeType: imageAttachment.contentType,
+                        data: Buffer.from(buffer).toString('base64'),
+                    }
+                };
+            } catch (e) {
+                console.error('Failed to fetch image attachment:', e);
+            }
+        }
 
         const history = msg.reference?.messageId
             ? await buildHistory(msg.channel, msg.reference.messageId, client.user.id, MAX_DEPTH)
@@ -63,7 +83,11 @@ module.exports = {
                 history,
             });
 
-            const result = await chatSession.sendMessage({ message: { text: prompt } });
+            const messageParts = [];
+            if (imagePart) messageParts.push(imagePart);
+            if (prompt) messageParts.push({ text: prompt });
+
+            const result = await chatSession.sendMessage({ message: messageParts });
 
             const usage = result.usageMetadata;
             const inputTokens = usage?.promptTokenCount || 0;
