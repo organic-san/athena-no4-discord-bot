@@ -11,12 +11,10 @@ function loadCanvas() {
     canvasReady = true;
     try {
         canvas = require('canvas');
-        console.log('[evidence] canvas 載入成功，證據卡片渲染可用');
     } catch (e) {
         canvas = null;
-        // 露出失敗原因，避免遠端「沒有產生圖片」時無從診斷
-        // （常見：缺 Cairo/Pango 等原生函式庫、預編譯二進位平台不符、GLIBC 版本不符）。
-        console.error('[evidence] canvas 載入失敗，證據卡片將退化為純文字/無圖：', e?.message || e);
+        // 載入失敗則退化為無圖；露出原因以利診斷（常見：缺原生函式庫或未編譯）。
+        console.error('[evidence] canvas 載入失敗，證據卡片將無圖：', e?.message || e);
     }
     return canvas;
 }
