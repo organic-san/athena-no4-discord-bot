@@ -114,6 +114,13 @@ module.exports = {
         cache.delete(guildId);
     },
 
+    /** 伺服器移除時：清除該伺服器設定與違規過多規則（含快取失效）。 */
+    purgeGuild(guildId) {
+        db.prepare(`DELETE FROM mod_config WHERE guild_id = ?`).run(guildId);
+        db.prepare(`DELETE FROM mod_escalation_rule WHERE guild_id = ?`).run(guildId);
+        cache.delete(guildId);
+    },
+
     /** 通報時標註管理員身分組用的 content 與 allowedMentions（未設定則為空）。 */
     adminMention(guildId) {
         const conf = this.get(guildId);

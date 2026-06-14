@@ -399,6 +399,15 @@ module.exports = {
         return { pid, summary };
     },
 
+    /** 伺服器移除時：清除該伺服器的處分與檢舉紀錄，回傳刪除筆數（單一交易）。 */
+    purgeGuild(guildId) {
+        const tx = db.transaction((gid) => ({
+            punishments: db.prepare(`DELETE FROM punishment WHERE guild_id = ?`).run(gid).changes,
+            reports: db.prepare(`DELETE FROM report WHERE guild_id = ?`).run(gid).changes,
+        }));
+        return tx(guildId);
+    },
+
     /** 在管理員告知頻道發送 Ban 裁決訊息。 */
     async postBanVerdict(guild, freezePunishmentId, userId, reason, freezeError) {
         const conf = modConfig.get(guild.id);
