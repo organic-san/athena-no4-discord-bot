@@ -4,6 +4,7 @@ const { GoogleGenAI } = require('@google/genai');
 const fs = require('fs');
 const func = require('../utility/functions');
 const system = require('../utility/system');
+const gptConfig = require('../utility/gptConfig');
 
 const MAX_DEPTH = 200;
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -33,6 +34,8 @@ module.exports = {
         if (msg.webhookId) return;
         if (msg.author.bot) return;
         if (!msg.mentions.has(client.user)) return;
+        // 僅在管理員以 /chatconfig 指定的頻道內才觸發（未設定則不觸發；DM 不受限）
+        if (msg.guild && !gptConfig.isAllowed(msg.guild.id, msg.channel.id)) return;
         if(msg.channel.permissionsFor(client.user).has(Discord.PermissionsBitField.Flags.SendMessages) === false) return;
 
         const prompt = msg.content.replace(/<@!?\d+>/g, '').trim();
@@ -98,10 +101,11 @@ module.exports = {
                 func.calcGeminiCost(inputTokens, outputTokens)
             );
 
+            // AI 產生的內容不允許觸發 @everyone／身分組／任意成員提及，避免被誘導轟炸
             const sends = func.sliceByWordCount(result.text, 1950);
-            await msg.reply(sends[0]);
+            await msg.reply({ content: sends[0], allowedMentions: { parse: [], repliedUser: true } });
             for (let i = 1; i < sends.length; i++) {
-                await msg.channel.send(sends[i]);
+                await msg.channel.send({ content: sends[i], allowedMentions: { parse: [] } });
             }
         } catch (err) {
             if(err.message?.includes("429") || err.message?.includes("503")) {

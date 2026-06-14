@@ -1,7 +1,8 @@
 {
   "dependencies": {
     "@google/genai": "^1.50.1",
-    "better-sqlite3": "^12.9.0",
+    "better-sqlite3": "^12.10.0",
+    "canvas": "^3.2.3",
     "discord.js": "^14.26.3",
     "dotenv": "^16.4.5"
   },
@@ -11,7 +12,8 @@
   "scripts": {
     "start": "node index.js",
     "dept": "node create-slash-global.js",
-    "deptl": "node create-slash.js"
+    "deptl": "node create-slash.js",
+    "clear": "node clear-slash.js"
   },
   "author": "organic_san",
   "license": "ISC",

@@ -1,7 +1,10 @@
 require('dotenv').config();
 
-const INPUT_PRICE_PER_M = 0;
-const OUTPUT_PRICE_PER_M = 0;
+// Gemini 計費（USD / 每百萬 token）。預設為 Gemini Flash-Lite 的參考費率，
+// 實際費率依使用的模型而定，可用 .env 的 GEMINI_INPUT_PRICE_PER_M /
+// GEMINI_OUTPUT_PRICE_PER_M 覆寫（請以 Google 官方定價為準）。
+const INPUT_PRICE_PER_M = parseFloat(process.env.GEMINI_INPUT_PRICE_PER_M ?? '0.075');
+const OUTPUT_PRICE_PER_M = parseFloat(process.env.GEMINI_OUTPUT_PRICE_PER_M ?? '0.30');
 
 module.exports = {
     calcGeminiCost(inputTokens, outputTokens) {

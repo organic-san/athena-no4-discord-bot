@@ -1,7 +1,7 @@
-### organic-gpt Discord bot
+### athena no.4 Discord bot
 - chatgpt api access
-- white list to save your costs
-- record users' usage and costs
+- server moderation
+- span detect
   
 default .env file:
 ```
@@ -14,8 +14,5 @@ DEFAULT_MODEL=gemini-3.1-flash-lite-preview
 DATABASE_URL=
 ```
 
-usage:
--gpt <text>
-
 contact: 
-Discord @organic_san
+Discord @organic_kaami

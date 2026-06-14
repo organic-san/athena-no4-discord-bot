@@ -12,8 +12,8 @@ const ai = new GoogleGenAI({apiKey: GEMINI_API_KEY });
 module.exports = {
     tag: "interaction",
     data: new Discord.SlashCommandBuilder()
-        .setName("gpt")
-        .setDescription("Hi! Athena No.4")
+        .setName("chat")
+        .setDescription("與 Athena No.4 聊天")
         .addStringOption(option =>
             option.setName("prompt")
                 .setDescription("輸入你的問題或提示")
@@ -33,7 +33,7 @@ module.exports = {
                 },
                 history: [],
             });
-            
+
             const resault = await chatSession.sendMessage({
                 message: {
                     text: prompt,
@@ -45,20 +45,21 @@ module.exports = {
             const outputTokens = usage?.candidatesTokenCount || 0;
 
             system.recordUsage(
-                interaction.user.id, 
-                interaction.user.username, 
-                inputTokens, 
-                outputTokens, 
+                interaction.user.id,
+                interaction.user.username,
+                inputTokens,
+                outputTokens,
                 func.calcGeminiCost(inputTokens, outputTokens)
             );
 
+            // AI 產生的內容不允許觸發 @everyone／身分組／任意成員提及，避免被誘導轟炸
             const sends = func.sliceByWordCount(resault.text, 1950);
-            await interaction.editReply(sends[0]);
+            await interaction.editReply({ content: sends[0], allowedMentions: { parse: [] } });
             for (let i = 1; i < sends.length; i++) {
-                await interaction.followUp(sends[i]);
+                await interaction.followUp({ content: sends[i], allowedMentions: { parse: [] } });
             }
         } catch (err) {
-            if(error.message?.includes("429")) {
+            if(err.message?.includes("429")) {
                 await interaction.editReply(`逼逼! 能量飲料耗光了...`);
                 return;
             }

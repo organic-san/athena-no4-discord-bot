@@ -1,5 +1,5 @@
 const Discord = require('discord.js');
-const { ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType, PermissionFlagsBits, InteractionContextType } = require('discord.js');
 require('dotenv').config();
 
 
@@ -9,12 +9,14 @@ module.exports = {
     tag: "interaction",
     data: new Discord.SlashCommandBuilder()
         .setName("log")
-        .setDescription("備份頻道訊息"),
+        .setDescription("備份頻道訊息")
+        .setContexts(InteractionContextType.Guild)
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
     async execute(client, interaction) {
 
-        if(interaction.user.id !== process.env.AUTHOR_USERID) {
-            await interaction.reply('只有受限制的對象才能使用這個指令。').catch(console.error);
+        if(!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+            await interaction.reply({ content: '只有管理員才能使用這個指令。', flags: Discord.MessageFlags.Ephemeral }).catch(console.error);
             return;
         }
 

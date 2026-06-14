@@ -5,16 +5,18 @@ module.exports = {
     name: "interaction",
     event: Discord.Events.InteractionCreate,
     async execute(client, interaction) {
-        if (!interaction.isChatInputCommand()) return;
+        // 處理斜線指令與右鍵選單（Message Context Menu）；其餘（按鈕/選單/Modal）交給 modInteraction.js
+        if (!interaction.isChatInputCommand() && !interaction.isMessageContextMenuCommand()) return;
 
         const command = client.interactionCmds.get(interaction.commandName);
         if (!command) return;
 
         let commandName = interaction.commandName;
-        if (interaction.options.getSubcommand(false)) {
+        if (interaction.isChatInputCommand() && interaction.options.getSubcommand(false)) {
             commandName += "/" + interaction.options.getSubcommand(false);
         }
-        console.log(`slash command: ${commandName}, from: ${interaction.guild?.name ?? 'DM'}, user: ${interaction.user.tag} (ID: ${interaction.user.id})`);
+        const kind = interaction.isMessageContextMenuCommand() ? 'context menu' : 'slash command';
+        console.log(`${kind}: ${commandName}, from: ${interaction.guild?.name ?? 'DM'}, user: ${interaction.user.tag} (ID: ${interaction.user.id})`);
 
         try {
             if (command.tag === "interaction") await command.execute(client, interaction);

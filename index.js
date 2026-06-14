@@ -31,6 +31,8 @@ if (!fs.existsSync(process.env.DATABASE_URL)) {
 
 client.once('clientReady', () => {
     console.log('Bot is online!');
+    // 啟動每日資料庫備份排程
+    require('./utility/backup').start();
 });
 
 const eventFiles = fs.readdirSync('./models').filter(file => file.endsWith('.js'));
