@@ -9,6 +9,7 @@ require('dotenv').config();
 const db = DB.getConnection();
 
 const REVOKE_WINDOW_MS = pf.REVOKE_WINDOW_MS; // 告知訊息上撤回按鈕的有效時間
+const DETECTION_BAN_DELETE_SECONDS = 60 * 60; // 偵測（跨頻道連發）停權：預設刪除 1 小時內的訊息
 
 function isAdmin(interaction) {
     return interaction.memberPermissions?.has(PermissionFlagsBits.Administrator);
@@ -110,6 +111,8 @@ module.exports = {
                     const type = interaction.values[0];
                     if (type === 'mute') {
                         await interaction.update({ content: '請選擇禁言時長：', components: [pf.durationSelectRow(src.token)] });
+                    } else if (type === 'ban') {
+                        await interaction.update({ content: '請選擇要刪除多久內的訊息：', components: [pf.banDeleteSelectRow(src.token)] });
                     } else {
                         await interaction.showModal(pf.reasonModal(src.token, type, 0));
                     }
@@ -122,9 +125,17 @@ module.exports = {
                     return;
                 }
 
+                if (action === 'bandel') {
+                    // 停權：選完刪除訊息時間（秒）後填理由；秒數沿用 modal 的 dur 欄位攜帶
+                    const delSec = interaction.values[0];
+                    await interaction.showModal(pf.reasonModal(src.token, 'ban', delSec));
+                    return;
+                }
+
                 if (action === 'modal') {
                     const [type, durStr] = src.tail;
                     const durationMin = type === 'mute' ? Number(durStr) : null;
+                    const banDeleteSeconds = type === 'ban' ? Number(durStr) : 0; // ban 時 dur 欄位＝刪除訊息秒數
                     const reason = interaction.fields.getTextInputValue('reason');
                     await interaction.deferReply();
 
@@ -134,6 +145,7 @@ module.exports = {
                     const { pid, summary } = await finalizePunishment(interaction, {
                         guild: interaction.guild, targetUserId: ctx.targetUserId, type, durationMin,
                         reason, source: ctx.source, report: ctx.report, evidenceSrc: ctx.evidenceSrc,
+                        banDeleteSeconds,
                     });
 
                     // 指定訊息（右鍵）：刪除原訊息（證據已固化於處分頻道）+ 公開告知 + 30 秒撤回按鈕
@@ -157,7 +169,18 @@ module.exports = {
                 const targetUserId = rest[1];
 
                 if (action === 'confirm') {
+                    // 先選刪除訊息時間，再於 confirmdel 真正停權
+                    await interaction.reply({
+                        content: '請選擇要刪除多久內的訊息，再確認停權：',
+                        components: [pf.banDeleteSelectRowRaw(`ban:confirmdel:${freezeId}:${targetUserId}`)],
+                        flags: Discord.MessageFlags.Ephemeral,
+                    });
+                    return;
+                }
+
+                if (action === 'confirmdel') {
                     await interaction.deferReply();
+                    const deleteSeconds = Number(interaction.values[0]);
                     const freeze = moderation.getPunishment(freezeId);
                     const reason = freeze?.reason || '違規過多停權'; // 凍結理由已標註觸發的違規過多規則
                     // 原子認領：把待裁決凍結就地轉成正式停權（CAS，並發/連點只有第一個成功 → 杜絕重複資料）
@@ -168,7 +191,7 @@ module.exports = {
                         return;
                     }
                     let res;
-                    try { res = await moderation.applyDiscordAction(interaction.guild, targetUserId, 'ban', null, reason); }
+                    try { res = await moderation.applyDiscordAction(interaction.guild, targetUserId, 'ban', null, reason, { deleteMessageSeconds: deleteSeconds }); }
                     catch (e) { res = { ok: false, error: String(e?.message || e) }; }
                     await interaction.message.edit({ components: [] }).catch(() => null);
 
@@ -288,6 +311,7 @@ module.exports = {
                         guild: interaction.guild, targetUserId, type: 'ban', durationMin: null,
                         reason, source: 'detection', report: null,
                         evidenceSrc: notifyMsg ? { transcribe: notifyMsg } : null,
+                        banDeleteSeconds: DETECTION_BAN_DELETE_SECONDS, // 跨頻道連發停權：刪除 1 小時內訊息
                     });
                     await interaction.message?.edit({ components: [] }).catch(() => null);
                     await interaction.editReply(summary);

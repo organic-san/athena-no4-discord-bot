@@ -81,6 +81,21 @@ module.exports = {
         return this.durationSelectRowRaw(`pf:dur:${srcToken}`);
     },
 
+    /** 任意 customId 的「停權刪除訊息時間」選單（含不刪除；供 Ban 裁決等非 pf 流程） */
+    banDeleteSelectRowRaw(customId) {
+        return new Discord.ActionRowBuilder().addComponents(
+            new Discord.StringSelectMenuBuilder()
+                .setCustomId(customId)
+                .setPlaceholder('選擇要刪除多久內的訊息')
+                .addOptions(moderation.DELETE_CHOICES)
+        );
+    },
+
+    /** pf 流程的「停權刪除訊息時間」選單 */
+    banDeleteSelectRow(srcToken) {
+        return this.banDeleteSelectRowRaw(`pf:bandel:${srcToken}`);
+    },
+
     /** 任意 customId 的理由 Modal（供非 pf 流程，如偵測停權） */
     reasonModalRaw(customId, type) {
         const modal = new Discord.ModalBuilder()

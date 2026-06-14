@@ -26,12 +26,24 @@ const DURATION_CHOICES = [
     { label: '28 天', value: '40320' },
 ];
 
+// 停權時可一併刪除「最近 N 秒」的訊息（Discord deleteMessageSeconds，上限 7 天）。含「不刪除」。
+const DELETE_CHOICES = [
+    { label: '不刪除訊息', value: '0' },
+    { label: '刪除 1 小時內訊息', value: '3600' },
+    { label: '刪除 6 小時內訊息', value: '21600' },
+    { label: '刪除 12 小時內訊息', value: '43200' },
+    { label: '刪除 24 小時內訊息', value: '86400' },
+    { label: '刪除 3 天內訊息', value: '259200' },
+    { label: '刪除 7 天內訊息', value: '604800' },
+];
+
 const TYPE_LABEL = { warn: '警告', mute: '禁言', kick: '踢出', ban: '停權' };
 const SOURCE_LABEL = { manual: '管理員處理', report_close: '檢舉結案', auto_escalation: '違規過多', detection: '偵測停權' };
 
 module.exports = {
     FREEZE_MIN,
     DURATION_CHOICES,
+    DELETE_CHOICES,
     TYPE_LABEL,
     SOURCE_LABEL,
 
@@ -164,11 +176,14 @@ module.exports = {
      * 在 Discord 上實際執行處分。呼叫端需自行 try/catch。
      * @returns {Promise<{ok:boolean, error?:string}>}
      */
-    async applyDiscordAction(guild, userId, type, durationMin, reason) {
+    async applyDiscordAction(guild, userId, type, durationMin, reason, opts = {}) {
         if (type === 'warn') return { ok: true };
 
         if (type === 'ban') {
-            await guild.bans.create(userId, { reason: reason || '審核系統處分' });
+            await guild.bans.create(userId, {
+                reason: reason || '審核系統處分',
+                deleteMessageSeconds: opts.deleteMessageSeconds || 0, // 0＝不刪訊息
+            });
             return { ok: true };
         }
 
@@ -317,11 +332,11 @@ module.exports = {
      * evidenceSrc 省略（null）時不產生任何圖片，僅發送純文字結論 embed。
      * @returns {Promise<{ pid:number, summary:string }>}
      */
-    async finalizePunishment({ guild, executorId, targetUserId, type, durationMin = null, reason, source, report = null, evidenceSrc = null }) {
+    async finalizePunishment({ guild, executorId, targetUserId, type, durationMin = null, reason, source, report = null, evidenceSrc = null, banDeleteSeconds = 0 }) {
         // 1. Discord 實際執行
         let actionResult;
         try {
-            actionResult = await this.applyDiscordAction(guild, targetUserId, type, durationMin, reason);
+            actionResult = await this.applyDiscordAction(guild, targetUserId, type, durationMin, reason, { deleteMessageSeconds: banDeleteSeconds });
         } catch (e) {
             actionResult = { ok: false, error: String(e?.message || e) };
         }
