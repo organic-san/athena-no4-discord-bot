@@ -129,9 +129,16 @@ module.exports = {
     },
 
     // ── 違規過多規則 ──
+    // 排序決定觸發優先序（checkEscalation 取第一條達標者）：
+    //   1) 先依處分嚴重度由重到輕（ban > kick > mute > warn）
+    //   2) 同嚴重度再依達標門檻由高到低
+    // 確保「重罰優先」且「速升規則不被同門檻的輕罰搶先」。
     getRules(guildId) {
         return db.prepare(
-            `SELECT * FROM mod_escalation_rule WHERE guild_id = ? ORDER BY warn_threshold DESC`
+            `SELECT * FROM mod_escalation_rule WHERE guild_id = ?
+             ORDER BY
+               CASE action WHEN 'ban' THEN 4 WHEN 'kick' THEN 3 WHEN 'mute' THEN 2 WHEN 'warn' THEN 1 ELSE 0 END DESC,
+               warn_threshold DESC`
         ).all(guildId);
     },
 

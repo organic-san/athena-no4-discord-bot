@@ -23,11 +23,38 @@ const TYPE_OPTIONS = [
     { label: '停權 (ban)', value: 'ban', emoji: '🔨' },
 ];
 
+// 處分告知訊息上「撤回」按鈕的有效時間（逾時改用 /modrevoke）。
+const REVOKE_WINDOW_MS = 30 * 1000;
+
 module.exports = {
     TYPE_OPTIONS,
+    REVOKE_WINDOW_MS,
 
     reportToken: (reportId) => `r:${reportId}`,
     messageToken: (channelId, msgId) => `m:${channelId}:${msgId}`,
+
+    /** 處分告知 embed（公開於執行頻道，描述由誰處分誰、原因）。 */
+    buildPunishNotice({ executorId, targetUserId, type, durationMin, reason, pid }) {
+        const label = moderation.TYPE_LABEL[type] || type;
+        const embed = new Discord.EmbedBuilder()
+            .setTitle(`⚖️ 處分：${label}`)
+            .setColor(type === 'ban' ? 0xED4245 : type === 'warn' ? 0xFAA61A : 0xE67E22)
+            .setDescription(`<@${executorId}> 對 <@${targetUserId}> 處以**${label}**`)
+            .addFields({ name: '原因', value: reason || '（未填寫）' })
+            .setFooter({ text: `處分 #${pid}` })
+            .setTimestamp();
+        if (type === 'mute' && durationMin) embed.addFields({ name: '時長', value: this.durationLabel(durationMin), inline: true });
+        return embed;
+    },
+
+    /** 撤回按鈕（限原處分者、REVOKE_WINDOW_MS 內有效）。 */
+    revokeRow(pid, executorId) {
+        return new Discord.ActionRowBuilder().addComponents(
+            new Discord.ButtonBuilder()
+                .setCustomId(`revoke:${pid}:${executorId}:${Date.now()}`)
+                .setLabel('撤回').setStyle(Discord.ButtonStyle.Danger).setEmoji('↩️'),
+        );
+    },
 
     /** 處分類型選單 */
     typeSelectRow(srcToken) {

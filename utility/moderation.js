@@ -2,6 +2,7 @@ const Discord = require('discord.js');
 const DB = require('./database.js');
 const func = require('./functions.js');
 const modConfig = require('./modConfig.js');
+const evidence = require('./evidence.js');
 require('dotenv').config();
 
 const db = DB.getConnection();
@@ -110,10 +111,41 @@ module.exports = {
     },
 
     getUserPunishments(guildId, userId, limit = 25) {
+        // 排除「違規過多待裁決凍結」：它只是暫時止血的 hold，本身不計為處分，
+        // 待管理員以 confirm/dur 裁決後才會就地轉成真正的處分（停權／定時禁言）。
         return db.prepare(
-            `SELECT * FROM punishment WHERE guild_id = ? AND target_user_id = ?
+            `SELECT * FROM punishment WHERE guild_id = ? AND target_user_id = ? AND source != 'escalation_freeze'
              ORDER BY created_at DESC LIMIT ?`
         ).all(guildId, userId, limit);
+    },
+
+    // ── 違規過多待裁決凍結（escalation_freeze）：暫時 hold，非處分 ──
+    /** 取得某用戶尚未裁決的凍結（用於避免重複觸發）。 */
+    getPendingFreeze(guildId, userId) {
+        return db.prepare(
+            `SELECT * FROM punishment WHERE guild_id = ? AND target_user_id = ?
+             AND source = 'escalation_freeze' AND revoked = 0 ORDER BY id DESC LIMIT 1`
+        ).get(guildId, userId);
+    },
+
+    /**
+     * 原子地「認領並轉換」一筆待裁決凍結為真正的處分（compare-and-swap）。
+     * WHERE 條件含 source='escalation_freeze'，故並發/連點只有第一個會成功，杜絕重複資料。
+     * @returns {boolean} 是否由本次呼叫認領成功。
+     */
+    resolveFreeze(id, fields) {
+        const keys = Object.keys(fields);
+        const set = keys.map(k => `${k} = ?`).join(', ');
+        const info = db.prepare(
+            `UPDATE punishment SET ${set} WHERE id = ? AND source = 'escalation_freeze'`
+        ).run(...keys.map(k => fields[k]), id);
+        return info.changes > 0;
+    },
+
+    /** 原子地刪除一筆待裁決凍結（解除凍結用；非處分故直接移除，不留撤回紀錄）。 */
+    deleteFreeze(id) {
+        const info = db.prepare(`DELETE FROM punishment WHERE id = ? AND source = 'escalation_freeze'`).run(id);
+        return info.changes > 0;
     },
 
     /** 計算某用戶在時間窗（小時）內未撤銷的 warn 數。 */
@@ -223,7 +255,7 @@ module.exports = {
      * @returns {Promise<{action:string, ruleId:number}|null>} 觸發的動作，未觸發回 null。
      */
     async checkEscalation(guild, userId) {
-        const rules = modConfig.getRules(guild.id); // 已依 warn_threshold DESC 排序
+        const rules = modConfig.getRules(guild.id); // 已依「嚴重度 → 門檻」排序，取第一條達標者
         let matched = null;
         for (const rule of rules) {
             const cnt = this.countWarns(guild.id, userId, rule.window_hours);
@@ -236,11 +268,16 @@ module.exports = {
         console.log(`[auto] 違規過多觸發：${guild.name} (${guild.id}), user ${userId}, 規則 #${matched.id} → ${action}`);
 
         if (action === 'ban') {
-            // Ban 永遠經人類拍板：先以無限期凍結止血，再發 Ban 裁決訊息。
+            // 已有未裁決的凍結則不重複觸發（避免堆疊多筆 hold 與重複裁決訊息）。
+            if (this.getPendingFreeze(guild.id, userId)) {
+                console.log(`[auto] 違規過多：user ${userId} 已有待裁決凍結，略過重複觸發`);
+                return { action: 'ban-pending', ruleId: matched.id };
+            }
+            // Ban 永遠經人類拍板：先以無限期凍結止血（source=escalation_freeze，本身不計處分），再發 Ban 裁決訊息。
             const res = await this.applyDiscordAction(guild, userId, 'mute', -1, reason).catch(e => ({ ok: false, error: String(e) }));
             const freezeId = this.insertPunishment({
                 guildId: guild.id, targetUserId: userId, type: 'mute', durationMin: -1,
-                reason: reason + '（待管理員裁決）', source: 'auto_escalation', executorId: 'SYSTEM',
+                reason, source: 'escalation_freeze', executorId: 'SYSTEM',
             });
             await this.postBanVerdict(guild, freezeId, userId, reason, res.ok ? null : res.error);
             return { action: 'ban-pending', ruleId: matched.id };
@@ -272,6 +309,79 @@ module.exports = {
         if (msgId) this.setEvidenceMsg(pid, msgId);
 
         return { action, ruleId: matched.id };
+    },
+
+    /**
+     * 統一處分收尾：Discord 執行 → 寫紀錄 → (可選)證據圖&結論發布 → 違規過多檢查 →（如有檢舉）更新 report。
+     * 由右鍵「給予處分」、/close 結案、Ban 裁決、偵測停權、以及 /warn /tempmute /kick /ban 共用。
+     * evidenceSrc 省略（null）時不產生任何圖片，僅發送純文字結論 embed。
+     * @returns {Promise<{ pid:number, summary:string }>}
+     */
+    async finalizePunishment({ guild, executorId, targetUserId, type, durationMin = null, reason, source, report = null, evidenceSrc = null }) {
+        // 1. Discord 實際執行
+        let actionResult;
+        try {
+            actionResult = await this.applyDiscordAction(guild, targetUserId, type, durationMin, reason);
+        } catch (e) {
+            actionResult = { ok: false, error: String(e?.message || e) };
+        }
+
+        // 2. 寫入紀錄
+        const pid = this.insertPunishment({
+            guildId: guild.id, targetUserId, type,
+            durationMin: type === 'mute' ? durationMin : null,
+            reason, source, executorId,
+        });
+
+        // 2.5 warn → 違規過多檢查（緊接 insert，中間無 await：insert 與 countWarns 在同一 tick
+        //      內完成，兩者的計算對並發呼叫具原子性，避免同一人並發 warn 時重複數到。）
+        let esc = null;
+        if (type === 'warn') {
+            esc = await this.checkEscalation(guild, targetUserId).catch(e => { console.error('escalation error:', e); return null; });
+        }
+
+        // 3. 證據圖 + 結論 → 處分發布頻道
+        //    證據來源統一為描述物件：{ render: 訊息 }（重繪卡片）或 { transcribe: 訊息 }（轉貼既有圖）；
+        //    省略時（如斜線指令）不產生任何圖片。
+        const files = [];
+        if (evidenceSrc?.render) {
+            const card = await evidence.renderMessageCard(evidenceSrc.render, { embedImages: true }).catch(() => null);
+            if (card) files.push(card.setSpoiler(true));
+        }
+        if (evidenceSrc?.transcribe) {
+            files.push(...await evidence.transcribeImages(evidenceSrc.transcribe).catch(() => []));
+        }
+        const embed = new Discord.EmbedBuilder()
+            .setTitle(`⚖️ 處分執行 — ${TYPE_LABEL[type] || type}`)
+            .setColor(type === 'ban' ? 0xED4245 : type === 'warn' ? 0xFAA61A : 0xE67E22)
+            .addFields(
+                { name: '處分編號', value: `#${pid}`, inline: true },
+                { name: '對象', value: `<@${targetUserId}>`, inline: true },
+                { name: '執行者', value: `<@${executorId}>`, inline: true },
+                { name: '理由', value: reason || '（未填寫）' },
+            )
+            .setTimestamp();
+        if (type === 'mute' && durationMin) embed.addFields({ name: '時長', value: this.durationLabel(durationMin), inline: true });
+        if (report) embed.setFooter({ text: `來自檢舉案件 #${report.id}` });
+        if (!actionResult.ok) embed.addFields({ name: '⚠️ 執行狀態', value: actionResult.error || '執行失敗（紀錄已保存）' });
+
+        const logMsgId = await this.postPunishmentLog(guild, embed, files);
+        if (logMsgId) this.setEvidenceMsg(pid, logMsgId);
+
+        // 4. 更新檢舉案件
+        if (report) {
+            db.prepare(`UPDATE report SET status = 'closed', punishment_id = ?, closed_at = ? WHERE id = ?`)
+                .run(pid, func.localISOTimeNow(), report.id);
+        }
+
+        // 5. 違規過多結果（已於 2.5 取得 esc）轉為摘要附註
+        let escalationNote = '';
+        if (esc?.action === 'ban-pending') escalationNote = '\n⚙️ 違規過多 Ban 警告：已凍結發言權限，於管理員頻道發送裁決訊息。';
+        else if (esc) escalationNote = `\n⚙️ 違規過多觸發：${TYPE_LABEL[esc.action] || esc.action}。`;
+
+        const statusNote = actionResult.ok ? '' : `\n⚠️ Discord 執行未完成：${actionResult.error}（紀錄已保存）`;
+        const summary = `✅ 已對 <@${targetUserId}> 執行**${TYPE_LABEL[type] || type}**（處分 #${pid}）。${statusNote}${escalationNote}`;
+        return { pid, summary };
     },
 
     /** 在管理員告知頻道發送 Ban 裁決訊息。 */
