@@ -13,12 +13,14 @@ module.exports = {
     },
 
     sliceByWordCount(str, count) {
+        // 容錯：str 可能為 undefined（如 AI 回應無文字片段），統一轉成字串避免讀 .length 崩潰。
+        let s = String(str ?? '');
         const sends = [];
-        while (str.length > count) {
-            sends.push(str.slice(0, count));
-            str = str.slice(count);
+        while (s.length > count) {
+            sends.push(s.slice(0, count));
+            s = s.slice(count);
         }
-        sends.push(str);
+        sends.push(s);
         return sends;
     },
 

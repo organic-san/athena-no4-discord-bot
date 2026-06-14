@@ -101,6 +101,13 @@ module.exports = {
                 func.calcGeminiCost(inputTokens, outputTokens)
             );
 
+            // 回應可能沒有文字（被安全過濾擋下、prompt 被擋、或空回應）→ 給明確訊息而非丟例外
+            if (!result.text || !result.text.trim()) {
+                const reason = result.candidates?.[0]?.finishReason || result.promptFeedback?.blockReason;
+                await msg.reply(`這次沒有產生內容${reason ? `（${reason}）` : ''}，可能是內容被安全過濾擋下或回應為空，換個說法再試試看。`);
+                return;
+            }
+
             // AI 產生的內容不允許觸發 @everyone／身分組／任意成員提及，避免被誘導轟炸
             const sends = func.sliceByWordCount(result.text, 1950);
             await msg.reply({ content: sends[0], allowedMentions: { parse: [], repliedUser: true } });
