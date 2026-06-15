@@ -5,6 +5,7 @@ const fs = require('fs');
 const func = require('../utility/functions');
 const system = require('../utility/system');
 const gptConfig = require('../utility/gptConfig');
+const notify = require('../utility/notify');
 
 const MAX_DEPTH = 200;
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -115,6 +116,7 @@ module.exports = {
                 await msg.channel.send({ content: sends[i], allowedMentions: { parse: [] } });
             }
         } catch (err) {
+            notify.error('處理 chat 時發生錯誤', err);
             if(err.message?.includes("429") || err.message?.includes("503")) {
                 await msg.reply(`逼逼! 能量飲料耗光了...`);
                 return;

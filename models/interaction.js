@@ -1,4 +1,5 @@
 const Discord = require('discord.js');
+const notify = require('../utility/notify');
 require('dotenv').config();
 
 module.exports = {
@@ -22,6 +23,7 @@ module.exports = {
             if (command.tag === "interaction") await command.execute(client, interaction);
         } catch (error) {
             console.error(error);
+            notify.error(`處理指令 ${commandName} 時發生錯誤`, error);
             try {
                 const msg = "在處理過程中發生意外的錯誤：```" + error + "```請稍後再試一次。\n" + `<@${process.env.AUTHOR_USERID}>`;
                 await interaction.reply({ content: msg }).catch(async () => {
