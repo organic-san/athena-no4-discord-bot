@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const DB = require('./database.js');
+const notify = require('./notify.js');
 require('dotenv').config();
 
 // 備份目錄。預設為專案根目錄下的 data/backup（跨平台可建立、可見）；
@@ -65,7 +66,10 @@ async function runBackup() {
 function start() {
     console.log(`[backup] 每日備份目錄：${BACKUP_DIR}（保留 ${RETENTION_DAYS} 天）`);
     runBackup().catch(e => console.error('[backup] 啟動備份失敗：', e));
-    const timer = setInterval(() => runBackup().catch(e => console.error('[backup] 排程備份失敗：', e)), INTERVAL_MS);
+    const timer = setInterval(() => {
+        runBackup().catch(e => console.error('[backup] 排程備份失敗：', e));
+        notify.log(`每日備份完成`);
+    }, INTERVAL_MS);
     timer.unref?.();
 }
 
