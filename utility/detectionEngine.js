@@ -2,7 +2,7 @@ const crypto = require('crypto');
 
 // 寫死的判定參數（不開放設定）
 const WINDOW_MS = 30 * 1000;       // 時間窗 30 秒
-const CHANNEL_THRESHOLD = 3;       // 跨頻道數門檻
+const CHANNEL_THRESHOLD = 4;       // 跨頻道數門檻
 
 // userId → Array<{ channelId, fingerprint, ts }>
 const records = new Map();
