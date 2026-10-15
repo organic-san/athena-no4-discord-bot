@@ -6,6 +6,7 @@ const DB = require("../../utility/database.js");
 const isafe = require("../../utility/interactionSafe.js");
 const modelConfig = require("../../utility/modelConfig.js");
 const gemini = require("../../utility/gemini.js");
+const schedule = require("../../utility/schedule.js");
 require('dotenv').config();
 
 function describeModel(p) {
@@ -102,6 +103,23 @@ module.exports = {
 
                 modelConfig.set(name);
                 await interaction.editReply(`✅ 已切換：${describeModel(profile)}`);
+                break;
+            }
+
+            case "schedule": {
+                const [sub, source] = args.trim().split(/\s+/);
+                if (sub === 'test' && ['tw', 'jp'].includes(source)) {
+                    // 結果以一般訊息送到本頻道（本回覆 10 秒後會被刪除）；模型產生約需數十秒到數分鐘。
+                    await interaction.editReply(`🧪 正在以最新${source === 'tw' ? '國際版' : '日版'}公告測試日程預告…`);
+                    await schedule.test(client, source, interaction.channel);
+                    await interaction.editReply('🧪 測試完成，結果如上。');
+                } else if (sub === 'poll') {
+                    await interaction.editReply(await schedule.poll(client)
+                        ? '已檢查一次新公告（有新公告會送到審核頻道）。'
+                        : '目前已有一次檢查正在進行中，請稍後再試。');
+                } else {
+                    await interaction.editReply('用法：`schedule test <tw|jp>`｜`schedule poll`');
+                }
                 break;
             }
 

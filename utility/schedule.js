@@ -401,18 +401,30 @@ function draftOf(source, articleId) {
     return rows.find(r => JSON.parse(r.data).articles.some(a => a.id === articleId)) ?? null;
 }
 
-/** 把待審核草稿標記為被取代，並移除舊審核訊息上的按鈕。已被處理過回傳 false。 */
-async function supersede(client, row, newNote) {
-    const ok = db.prepare(`UPDATE schedule_draft SET status = 'superseded' WHERE id = ? AND status = 'pending'`).run(row.id).changes > 0;
-    if (!ok) return false;
+/** 在草稿的審核訊息（帶按鈕的那則）後附註，並替換按鈕。 */
+async function annotateReview(client, row, note, components) {
     try {
         const channel = await client.channels.fetch(row.review_channel_id);
         const msg = await channel.messages.fetch(row.review_message_id);
-        await msg.edit({ content: `${msg.content}\n\n↪️ ${newNote}`.slice(0, MSG_LIMIT), components: [], allowedMentions: { parse: [] } });
+        const room = MSG_LIMIT - note.length - 2;
+        const base = msg.content.length > room ? msg.content.slice(0, room - 1) + '…' : msg.content;
+        await msg.edit({ content: `${base}\n\n${note}`, components, allowedMentions: { parse: [] } });
     } catch (e) {
         console.warn(`[schedule] 無法更新草稿 #${row.id} 的審核訊息：`, e.message);
     }
-    return true;
+}
+
+/** 把待審核草稿標記為被取代，並移除舊審核訊息上的按鈕。已被處理過回傳 false。 */
+async function supersede(client, row, newNote) {
+    const ok = db.prepare(`UPDATE schedule_draft SET status = 'superseded' WHERE id = ? AND status = 'pending'`).run(row.id).changes > 0;
+    if (ok) await annotateReview(client, row, `↪️ ${newNote}`, []);
+    return ok;
+}
+
+/** 取代用的新草稿產生失敗時，把舊草稿恢復為待審核並放回按鈕，避免兩份都無法操作。 */
+async function restore(client, row) {
+    const ok = db.prepare(`UPDATE schedule_draft SET status = 'pending' WHERE id = ? AND status = 'superseded'`).run(row.id).changes > 0;
+    if (ok) await annotateReview(client, row, '↩️ 新草稿產生失敗，此草稿恢復為待審核（不含晚到的募集公告）', reviewButtons(row.id));
 }
 
 async function pollSource(client, source) {
@@ -468,7 +480,7 @@ async function pollSource(client, source) {
             handled.add(m.id);
             const old = draftOf('jp', m.id);
             if (old && await supersede(client, old, `募集公告晚於本草稿發布，已重新產生草稿`)) {
-                groups.push({ articles: [m, ...pickupsNear(articles, m)], note: `（含晚到的募集公告，取代 #${old.id}）` });
+                groups.push({ articles: [m, ...pickupsNear(articles, m)], note: `（含晚到的募集公告，取代 #${old.id}）`, replaces: old });
             } else {
                 const state = old ? `草稿 #${old.id} ${STATUS_LABEL[db.prepare(`SELECT status FROM schedule_draft WHERE id = ?`).get(old.id).status]}` : '維修公告沒有草稿';
                 await review.send(notice(`🆕 募集公告晚於維修公告發布（${state}），請手動補上：[${p.title}](<${p.url}>)`));
@@ -476,7 +488,7 @@ async function pollSource(client, source) {
         }
     }
 
-    for (const { articles: group, note } of groups) {
+    for (const { articles: group, note, replaces } of groups) {
         // 先標記再產生：產生失敗時不會每輪重試、重複消耗模型額度，改由管理員以 /system schedule test 重跑。
         group.forEach(markSeen);
         try {
@@ -484,14 +496,17 @@ async function pollSource(client, source) {
         } catch (err) {
             console.error('[schedule] 草稿產生失敗：', err);
             notify.error('日程預告草稿產生失敗', err);
+            if (replaces) await restore(client, replaces);
             const links = group.map(a => `[${a.title}](<${a.url}>)`).join('\n');
-            await review.send(notice(`⚠️ 日程預告草稿產生失敗：\n${links}\n\`${String(err.message).slice(0, 500)}\``));
+            await review.send(notice(`⚠️ 日程預告草稿產生失敗：\n${links}\n\`${String(err.message).slice(0, 500)}\``
+                + (replaces ? `\n草稿 #${replaces.id} 已恢復為待審核，晚到的募集公告請手動補上。` : '')));
         }
     }
 }
 
+/** 檢查一次所有來源；已有檢查進行中時不重複執行，回傳 false。 */
 async function poll(client) {
-    if (polling) return;
+    if (polling) return false;
     polling = true;
     try {
         for (const source of SOURCES) {
@@ -508,6 +523,7 @@ async function poll(client) {
     } finally {
         polling = false;
     }
+    return true;
 }
 
 /** 伺服器的附件上限（依加成等級）。日版主視覺可達 9MB，超過上限會讓整個討論串建立失敗。 */
@@ -529,6 +545,12 @@ module.exports = {
     /** 啟動輪詢（clientReady 後呼叫）。 */
     start(client) {
         if (timer) return;
+        // 發布途中 bot 重啟會讓草稿停在「處理中」且按鈕無法再操作；改為失敗並提醒人工確認。
+        const stuck = db.prepare(`SELECT id FROM schedule_draft WHERE status = 'publishing'`).all().map(r => r.id);
+        if (stuck.length) {
+            db.prepare(`UPDATE schedule_draft SET status = 'failed' WHERE status = 'publishing'`).run();
+            notify.log(`<@${authorId()}> ⚠️ 日程預告草稿 ${stuck.map(id => `#${id}`).join('、')} 在處理途中中斷（bot 重啟），已標記為處理失敗。請確認討論串與預告是否已建立或發布。`);
+        }
         const minutes = loadConfig().pollMinutes || 10;
         setTimeout(() => poll(client), 30 * 1000);
         timer = setInterval(() => poll(client), minutes * 60 * 1000);
