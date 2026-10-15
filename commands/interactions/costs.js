@@ -1,5 +1,6 @@
 const Discord = require('discord.js');
 const system = require('../../utility/system');
+const modelConfig = require('../../utility/modelConfig');
 require('dotenv').config();
 
 module.exports = {
@@ -56,7 +57,7 @@ module.exports = {
                 { name: "查詢次數", value: data.queryCount.toLocaleString(), inline: true },
                 { name: "估算費用", value: `$${data.cost.toFixed(6)} USD`, inline: true },
             )
-            .setFooter({ text: `模型：${process.env.DEFAULT_MODEL}` });
+            .setFooter({ text: `目前模型：${modelConfig.current().name}` });
 
         await interaction.editReply({ embeds: [embed] });
     }

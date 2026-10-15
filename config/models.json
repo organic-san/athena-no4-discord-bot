@@ -1,0 +1,17 @@
+{
+    "default": "gemini-3.5-flash-lite",
+    "models": {
+        "gemini-3.5-flash-lite": {
+            "thinkingLevel": "MINIMAL",
+            "maxOutputTokens": 2048,
+            "inputPricePerM": 0.30,
+            "outputPricePerM": 2.50
+        },
+        "gemini-3.8-flash": {
+            "thinkingLevel": "LOW",
+            "maxOutputTokens": 8192,
+            "inputPricePerM": 0.75,
+            "outputPricePerM": 3.75
+        }
+    }
+}

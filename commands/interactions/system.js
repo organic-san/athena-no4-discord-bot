@@ -4,7 +4,23 @@ const { exec } = require('child_process');
 
 const DB = require("../../utility/database.js");
 const isafe = require("../../utility/interactionSafe.js");
+const modelConfig = require("../../utility/modelConfig.js");
+const gemini = require("../../utility/gemini.js");
 require('dotenv').config();
+
+function describeModel(p) {
+    return `${p.name}｜thinking ${p.thinkingLevel}｜輸出上限 ${p.maxOutputTokens}｜$${p.inputPricePerM} / $${p.outputPricePerM} 每百萬 token（輸入/輸出）`;
+}
+
+/** git pull 後重新讀取 config/models.json，回傳附加在輸出後的說明。 */
+function reloadModels() {
+    try {
+        modelConfig.reload();
+        return `\n模型設定已重新載入，目前：${modelConfig.current().name}`;
+    } catch (e) {
+        return `\n⚠️ config/models.json 載入失敗，沿用原設定：${e.message}`;
+    }
+}
 
 module.exports = {
     tag: "interaction",
@@ -49,15 +65,45 @@ module.exports = {
                         interaction.editReply(`執行失敗：\`\`\`${err}\`\`\``).catch(console.error);
                         return;
                     }
+                    const reloadNote = reloadModels();
                     if(stderr) {
                         console.error(`stderr: ${stderr}`);
-                        interaction.editReply(`執行完成，輸出錯誤：\`\`\`${stderr}\`\`\``).catch(console.error);
+                        interaction.editReply(`執行完成，輸出錯誤：\`\`\`${stderr}\`\`\`${reloadNote}`).catch(console.error);
                         return;
                     }
                     console.log(`stdout: ${stdout}`);
-                    interaction.editReply(`執行完成，輸出：\`\`\`${stdout}\`\`\``).catch(console.error);
+                    interaction.editReply(`執行完成，輸出：\`\`\`${stdout}\`\`\`${reloadNote}`).catch(console.error);
                 });
                 break;
+
+            case "model": {
+                // 每次都重讀 models.json，手動改檔或 pull 失敗時也能取得最新內容；格式有誤由外層 catch 回報。
+                modelConfig.reload();
+                const name = args.trim();
+                if (!name) {
+                    const list = modelConfig.list().map(n => `- ${describeModel(modelConfig.get(n))}`).join('\n');
+                    await interaction.editReply(`目前：${describeModel(modelConfig.current())}\n可切換：\n${list}`);
+                    break;
+                }
+
+                const profile = modelConfig.get(name);
+                if (!profile) {
+                    await interaction.editReply(`config/models.json 裡沒有 ${name}。可切換：${modelConfig.list().join('、')}`);
+                    break;
+                }
+
+                // 先實際呼叫一次，模型名稱打錯或 thinkingLevel 不支援時就不切換，避免之後每則訊息都失敗。
+                try {
+                    await gemini.probe(profile);
+                } catch (e) {
+                    await interaction.editReply(`測試呼叫失敗，未切換：\`\`\`${e.message}\`\`\``);
+                    break;
+                }
+
+                modelConfig.set(name);
+                await interaction.editReply(`✅ 已切換：${describeModel(profile)}`);
+                break;
+            }
 
             case "cmdupdate":
                 exec('node ester-slash.js', (error, stdout, stderr) => {
@@ -103,7 +149,8 @@ module.exports = {
             default:
                 const usage = "可用的操作：\n" +
                     "- eval <code>: eval program\n" +
-                    "- pull: git pull\n" +
+                    "- pull: git pull (並重新載入 config/models.json)\n" +
+                    "- model [name]: 查看／切換 Gemini 模型\n" +
                     "- cmdupdate: cmd update\n" +
                     "- cmdupdateg: cmd update global\n" +
                     "- restart (r): restart bot";

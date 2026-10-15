@@ -23,7 +23,7 @@ module.exports = {
 
         try {
             const chatSession = gemini.ai.chats.create({
-                model: gemini.MODEL,
+                model: gemini.model(),
                 config: gemini.config(client.user.username),
                 history: [],
             });
@@ -36,14 +36,14 @@ module.exports = {
                 },
             }));
 
-            const { inputTokens, outputTokens } = gemini.usageOf(resault);
+            const { inputTokens, outputTokens, cost } = gemini.usageOf(resault);
 
             system.recordUsage(
                 interaction.user.id,
                 interaction.user.username,
                 inputTokens,
                 outputTokens,
-                func.calcGeminiCost(inputTokens, outputTokens)
+                cost
             );
 
             // 回應可能沒有文字（被安全過濾擋下、輸出額度用盡、或空回應）→ 給明確訊息而非丟例外

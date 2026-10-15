@@ -1,17 +1,12 @@
 const fs = require('fs');
 const { GoogleGenAI, ApiError } = require('@google/genai');
+const modelConfig = require('./modelConfig.js');
 require('dotenv').config();
 
-const MODEL = process.env.DEFAULT_MODEL || 'gemini-3.5-flash-lite';
-
-// Gemini 3.x 用 thinkingLevel（字串列舉）取代舊的 thinkingBudget。
-// gemini-3.5-flash-lite 支援 MINIMAL/LOW/MEDIUM/HIGH，預設為 MINIMAL。
-const THINKING_LEVEL = (process.env.GEMINI_THINKING_LEVEL || 'MINIMAL').toUpperCase();
-
-// 輸出上限。注意：thinking token 會一併計入這個額度，所以調高 THINKING_LEVEL 時
-// 這個值必須跟著調高，否則額度會被 thinking 吃光而回傳空內容（finishReason = MAX_TOKENS）。
-// 預設 2048，對應 Discord 單則訊息 2000 字元的規模。
-const MAX_OUTPUT_TOKENS = parseInt(process.env.GEMINI_MAX_OUTPUT_TOKENS || '2048', 10);
+// 模型、thinkingLevel、maxOutputTokens、單價皆由 modelConfig 提供（config/models.json），
+// 每次呼叫時讀取，切換模型後立即生效。
+// 注意：thinking token 會一併計入 maxOutputTokens，調高 thinkingLevel 時輸出上限必須跟著調高，
+// 否則額度會被 thinking 吃光而回傳空內容（finishReason = MAX_TOKENS）。
 
 // 暫時性錯誤：值得退避重試。其餘（400 參數錯誤、403 金鑰問題等）重試沒有意義。
 const RETRYABLE = new Set([429, 500, 502, 503, 504]);
@@ -31,10 +26,21 @@ function statusOf(err) {
     return typeof err?.status === 'number' ? err.status : null;
 }
 
+/** 依模型設定組出 thinking 與輸出上限。 */
+function generationParams(profile) {
+    return {
+        maxOutputTokens: profile.maxOutputTokens,
+        thinkingConfig: { thinkingLevel: profile.thinkingLevel },
+    };
+}
+
 module.exports = {
     ai,
-    MODEL,
-    MAX_OUTPUT_TOKENS,
+
+    /** 目前使用中的模型名稱。 */
+    model() {
+        return modelConfig.current().name;
+    },
 
     /** 取得填入機器人名稱後的 system prompt。 */
     systemPrompt(botName) {
@@ -46,10 +52,21 @@ module.exports = {
     config(botName, extra = {}) {
         return {
             systemInstruction: this.systemPrompt(botName),
-            maxOutputTokens: MAX_OUTPUT_TOKENS,
-            thinkingConfig: { thinkingLevel: THINKING_LEVEL },
+            ...generationParams(modelConfig.current()),
             ...extra,
         };
+    },
+
+    /**
+     * 以指定模型設定送一次極短的請求，確認模型名稱、thinkingLevel 等組合可用。
+     * 失敗時丟出原始錯誤；用於切換模型前，避免切過去後每則訊息都失敗。
+     */
+    async probe(profile) {
+        await ai.models.generateContent({
+            model: profile.name,
+            contents: 'ping',
+            config: generationParams(profile),
+        });
     },
 
     statusOf,
@@ -75,14 +92,18 @@ module.exports = {
     },
 
     /**
-     * 由 usageMetadata 取出計費用的 token 數。
+     * 由 usageMetadata 取出計費用的 token 數與依目前模型單價估算的費用（USD）。
      * thinking token 不含在 candidatesTokenCount 內，但 Google 依 output 費率計價，須合併。
      */
     usageOf(response) {
         const usage = response?.usageMetadata;
+        const inputTokens = usage?.promptTokenCount || 0;
+        const outputTokens = (usage?.candidatesTokenCount || 0) + (usage?.thoughtsTokenCount || 0);
+        const { inputPricePerM, outputPricePerM } = modelConfig.current();
         return {
-            inputTokens: usage?.promptTokenCount || 0,
-            outputTokens: (usage?.candidatesTokenCount || 0) + (usage?.thoughtsTokenCount || 0),
+            inputTokens,
+            outputTokens,
+            cost: (inputTokens / 1_000_000) * inputPricePerM + (outputTokens / 1_000_000) * outputPricePerM,
         };
     },
 
@@ -92,7 +113,7 @@ module.exports = {
 
         const finish = response?.candidates?.[0]?.finishReason;
         if (finish === 'MAX_TOKENS') {
-            return `回應長度超過上限（maxOutputTokens = ${MAX_OUTPUT_TOKENS}，thinking 也會佔用此額度）`;
+            return `回應長度超過上限（maxOutputTokens = ${modelConfig.current().maxOutputTokens}，thinking 也會佔用此額度）`;
         }
 
         const blocked = response?.promptFeedback?.blockReason;

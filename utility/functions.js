@@ -1,19 +1,6 @@
 require('dotenv').config();
 
-// Gemini 計費（USD / 每百萬 token）。預設為 gemini-3.5-flash-lite 的標準費率，
-// 實際費率依使用的模型而定，可用 .env 的 GEMINI_INPUT_PRICE_PER_M /
-// GEMINI_OUTPUT_PRICE_PER_M 覆寫（請以 Google 官方定價為準）。
-// 注意：Gemini 3.x 的 thinking token 依 output 費率計價，故 outputTokens 需含 thinking
-// （見 utility/gemini.js 的 usageOf）。
-const INPUT_PRICE_PER_M = parseFloat(process.env.GEMINI_INPUT_PRICE_PER_M ?? '0.30');
-const OUTPUT_PRICE_PER_M = parseFloat(process.env.GEMINI_OUTPUT_PRICE_PER_M ?? '2.50');
-
 module.exports = {
-    calcGeminiCost(inputTokens, outputTokens) {
-        return (inputTokens / 1_000_000) * INPUT_PRICE_PER_M +
-               (outputTokens / 1_000_000) * OUTPUT_PRICE_PER_M;
-    },
-
     sliceByWordCount(str, count) {
         // 容錯：str 可能為 undefined（如 AI 回應無文字片段），統一轉成字串避免讀 .length 崩潰。
         let s = String(str ?? '');

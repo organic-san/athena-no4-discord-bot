@@ -88,7 +88,7 @@ module.exports = {
 
         try {
             const chatSession = gemini.ai.chats.create({
-                model: gemini.MODEL,
+                model: gemini.model(),
                 config: gemini.config(client.user.username, {
                     tools: [
                         {
@@ -105,11 +105,10 @@ module.exports = {
 
             const result = await gemini.withRetry(() => chatSession.sendMessage({ message: messageParts }));
 
-            const { inputTokens, outputTokens } = gemini.usageOf(result);
+            const { inputTokens, outputTokens, cost } = gemini.usageOf(result);
             system.recordUsage(
                 msg.author.id, msg.author.username,
-                inputTokens, outputTokens,
-                func.calcGeminiCost(inputTokens, outputTokens)
+                inputTokens, outputTokens, cost
             );
 
             // 回應可能沒有文字（被安全過濾擋下、輸出額度用盡、或空回應）→ 給明確訊息而非丟例外
