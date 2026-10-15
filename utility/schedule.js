@@ -395,6 +395,15 @@ function pickupsNear(all, maintenance) {
     return all.filter(p => p.kind === 'jp_pickup' && pairsWith(p, maintenance));
 }
 
+/** 某來源最新的一組公告（國際版：最新更新日誌；日版：最新維修公告＋配對的募集公告）。 */
+async function latestGroup(source) {
+    const articles = await fetcher.list(source);
+    const latest = kind => articles.filter(a => a.kind === kind).sort((a, b) => b.publishedAt - a.publishedAt)[0];
+    const head = latest(source === 'tw' ? 'tw_update' : 'jp_maintenance');
+    if (!head) throw new Error('找不到最新的公告');
+    return source === 'tw' ? [head] : [head, ...pickupsNear(articles, head)];
+}
+
 /** 找出包含某篇公告的最新一份草稿。 */
 function draftOf(source, articleId) {
     const rows = db.prepare(`SELECT * FROM schedule_draft WHERE source = ? ORDER BY id DESC LIMIT 20`).all(source);
@@ -564,21 +573,16 @@ module.exports = {
      */
     async test(client, source, channel) {
         const cfg = loadConfig();
-        const articles = await fetcher.list(source);
-        const latest = kind => articles.filter(a => a.kind === kind).sort((a, b) => b.publishedAt - a.publishedAt)[0];
-
-        let group;
-        if (source === 'tw') {
-            const a = latest('tw_update');
-            group = a && [a];
-        } else {
-            const m = latest('jp_maintenance');
-            group = m && [m, ...pickupsNear(articles, m)];
-        }
-        if (!group) throw new Error('找不到可測試的公告');
-
-        const draft = await buildDraft(client, source, group);
+        const draft = await buildDraft(client, source, await latestGroup(source));
         await sendPreview(channel, draft, cfg, `🧪 **日程預告測試**（${cfg.sources[source].label}）：不會建立討論串，也不會發布`);
+    },
+
+    /**
+     * 以最新一筆公告產生一份正式草稿（附審核按鈕）送到審核頻道，用來實際測試按鈕流程。
+     * 不更動「已看過」紀錄，不影響自動輪詢。按 ✅ 會真的發布。
+     */
+    async draft(client, source) {
+        await createDraft(client, source, await latestGroup(source), '（手動產生）');
     },
 
     STATUS_LABEL,

@@ -113,12 +113,16 @@ module.exports = {
                     await interaction.editReply(`🧪 正在以最新${source === 'tw' ? '國際版' : '日版'}公告測試日程預告…`);
                     await schedule.test(client, source, interaction.channel);
                     await interaction.editReply('🧪 測試完成，結果如上。');
+                } else if (sub === 'draft' && ['tw', 'jp'].includes(source)) {
+                    await interaction.editReply(`📝 正在以最新${source === 'tw' ? '國際版' : '日版'}公告產生正式草稿…`);
+                    await schedule.draft(client, source);
+                    await interaction.editReply('📝 草稿已送到審核頻道（附按鈕；按 ✅ 會真的發布）。');
                 } else if (sub === 'poll') {
                     await interaction.editReply(await schedule.poll(client)
                         ? '已檢查一次新公告（有新公告會送到審核頻道）。'
                         : '目前已有一次檢查正在進行中，請稍後再試。');
                 } else {
-                    await interaction.editReply('用法：`schedule test <tw|jp>`｜`schedule poll`');
+                    await interaction.editReply('用法：`schedule test <tw|jp>`｜`schedule draft <tw|jp>`｜`schedule poll`');
                 }
                 break;
             }
@@ -153,6 +157,7 @@ module.exports = {
                     "- pull: git pull (並重新載入 config/models.json)\n" +
                     "- model [name]: 查看／切換 Gemini 模型\n" +
                     "- schedule test <tw|jp>: 以最新公告測試日程預告（不建立討論串、不發布）\n" +
+                    "- schedule draft <tw|jp>: 以最新公告產生正式草稿到審核頻道（附按鈕，✅ 會真的發布）\n" +
                     "- schedule poll: 立即檢查一次新公告\n" +
                     "- cmdupdate: cmd update\n" +
                     "- cmdupdateg: cmd update global\n" +
