@@ -1,6 +1,7 @@
 const fs = require('fs');
 const { GoogleGenAI, ApiError } = require('@google/genai');
 const modelConfig = require('./modelConfig.js');
+const aiTools = require('./aiTools.js');
 require('dotenv').config();
 
 // 模型、thinkingLevel、maxOutputTokens、單價皆由 modelConfig 提供（config/models.json），
@@ -10,6 +11,9 @@ require('dotenv').config();
 
 // 暫時性錯誤：值得退避重試。其餘（400 參數錯誤、403 金鑰問題等）重試沒有意義。
 const RETRYABLE = new Set([429, 500, 502, 503, 504]);
+
+// 單則訊息最多執行幾輪工具呼叫；每一輪都會重送整段上下文、另外計費。
+const MAX_TOOL_ROUNDS = 3;
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
@@ -58,14 +62,50 @@ module.exports = {
     },
 
     /**
-     * 以指定模型設定送一次極短的請求，確認模型名稱、thinkingLevel 等組合可用。
+     * tools 設定：自訂工具（aiTools，依 ctx 篩選可用者）＋可選的 Google 搜尋。
+     * 用法：config(botName, tools(ctx, { googleSearch: true }))。
+     */
+    tools(ctx, { googleSearch = false } = {}) {
+        const tools = [{ functionDeclarations: aiTools.declarations(ctx) }];
+        if (!googleSearch) return { tools };
+        // 內建工具與自訂工具並用（Gemini 3 起支援，目前為 Preview）時，官方範例皆開啟此旗標。
+        return {
+            tools: [{ googleSearch: {} }, ...tools],
+            toolConfig: { includeServerSideToolInvocations: true },
+        };
+    },
+
+    /**
+     * 送出訊息並處理 function calling：模型要求呼叫工具時執行並回傳結果，
+     * 直到產生最終回覆（最多 MAX_TOOL_ROUNDS 輪）。usage 為各輪加總。
+     * ctx = { userId, guild }，工具一律以此認定發問者，見 aiTools。
+     */
+    async send(chatSession, message, ctx) {
+        let response = await this.withRetry(() => chatSession.sendMessage({ message }));
+        const usage = this.usageOf(response);
+
+        for (let round = 0; round < MAX_TOOL_ROUNDS && response.functionCalls?.length; round++) {
+            const parts = await Promise.all(response.functionCalls.map(async call => ({
+                functionResponse: { id: call.id, name: call.name, response: await aiTools.run(call, ctx) },
+            })));
+            response = await this.withRetry(() => chatSession.sendMessage({ message: parts }));
+            const u = this.usageOf(response);
+            usage.inputTokens += u.inputTokens;
+            usage.outputTokens += u.outputTokens;
+            usage.cost += u.cost;
+        }
+        return { response, usage };
+    },
+
+    /**
+     * 以指定模型設定送一次極短的請求，確認模型名稱、thinkingLevel 與工具組合可用。
      * 失敗時丟出原始錯誤；用於切換模型前，避免切過去後每則訊息都失敗。
      */
     async probe(profile) {
         await ai.models.generateContent({
             model: profile.name,
             contents: 'ping',
-            config: generationParams(profile),
+            config: { ...generationParams(profile), ...this.tools(null, { googleSearch: true }) },
         });
     },
 
@@ -110,6 +150,7 @@ module.exports = {
     /** 回應沒有可用文字時的原因說明；正常有內容則回傳 null。 */
     emptyReason(response) {
         if (response?.text && response.text.trim()) return null;
+        if (response?.functionCalls?.length) return `工具呼叫超過 ${MAX_TOOL_ROUNDS} 輪上限`;
 
         const finish = response?.candidates?.[0]?.finishReason;
         if (finish === 'MAX_TOKENS') {

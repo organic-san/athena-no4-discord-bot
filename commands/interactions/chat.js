@@ -22,21 +22,20 @@ module.exports = {
         const prompt = interaction.options.getString("prompt");
 
         try {
+            const toolCtx = { userId: interaction.user.id, guild: interaction.guild };
             const chatSession = gemini.ai.chats.create({
                 model: gemini.model(),
-                config: gemini.config(client.user.username),
+                config: gemini.config(client.user.username, gemini.tools(toolCtx)),
                 history: [],
             });
 
             // 發話者標註格式與 models/message.js 一致，避免兩個入口對模型呈現不同的輸入樣貌。
             const speaker = interaction.member?.displayName || interaction.user.displayName;
-            const resault = await gemini.withRetry(() => chatSession.sendMessage({
-                message: {
-                    text: `[${speaker}]: ${prompt}`,
-                },
-            }));
-
-            const { inputTokens, outputTokens, cost } = gemini.usageOf(resault);
+            const { response: resault, usage: { inputTokens, outputTokens, cost } } = await gemini.send(
+                chatSession,
+                { text: `[${speaker}]: ${prompt}` },
+                toolCtx
+            );
 
             system.recordUsage(
                 interaction.user.id,

@@ -10,6 +10,12 @@ db.prepare(`CREATE TABLE IF NOT EXISTS gpt_channel (
     PRIMARY KEY (guild_id, channel_id)
 )`).run();
 
+// 伺服器規則頻道（每伺服器一個，供 AI 工具 get_server_rules 讀取）
+db.prepare(`CREATE TABLE IF NOT EXISTS gpt_rules_channel (
+    guild_id TEXT PRIMARY KEY,
+    channel_id TEXT
+)`).run();
+
 // 自舊的單頻道 gpt_config 表遷移（若存在）
 try {
     const rows = db.prepare(`SELECT guild_id, channel_id FROM gpt_config WHERE channel_id IS NOT NULL`).all();
@@ -21,6 +27,8 @@ try {
 
 // guildId → string[]（每則訊息都會讀取，異動時失效）
 const cache = new Map();
+// guildId → 規則頻道 ID | null
+const rulesCache = new Map();
 
 function load(guildId) {
     if (cache.has(guildId)) return cache.get(guildId);
@@ -55,5 +63,31 @@ module.exports = {
     clear(guildId) {
         db.prepare(`DELETE FROM gpt_channel WHERE guild_id = ?`).run(guildId);
         cache.delete(guildId);
+    },
+
+    /** 規則頻道 ID；未設定回傳 null。 */
+    getRulesChannel(guildId) {
+        if (!rulesCache.has(guildId)) {
+            const row = db.prepare(`SELECT channel_id FROM gpt_rules_channel WHERE guild_id = ?`).get(guildId);
+            rulesCache.set(guildId, row?.channel_id ?? null);
+        }
+        return rulesCache.get(guildId);
+    },
+
+    /** 設定規則頻道；channelId 為 null 時移除設定。 */
+    setRulesChannel(guildId, channelId) {
+        if (channelId) {
+            db.prepare(`INSERT INTO gpt_rules_channel (guild_id, channel_id) VALUES (?, ?)
+                ON CONFLICT(guild_id) DO UPDATE SET channel_id = excluded.channel_id`).run(guildId, channelId);
+        } else {
+            db.prepare(`DELETE FROM gpt_rules_channel WHERE guild_id = ?`).run(guildId);
+        }
+        rulesCache.delete(guildId);
+    },
+
+    /** 機器人離開伺服器時清除全部聊天設定（聊天頻道與規則頻道）。 */
+    purgeGuild(guildId) {
+        this.clear(guildId);
+        this.setRulesChannel(guildId, null);
     },
 };

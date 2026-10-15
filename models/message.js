@@ -87,15 +87,10 @@ module.exports = {
         }
 
         try {
+            const toolCtx = { userId: msg.author.id, guild: msg.guild };
             const chatSession = gemini.ai.chats.create({
                 model: gemini.model(),
-                config: gemini.config(client.user.username, {
-                    tools: [
-                        {
-                            googleSearch: { }
-                        }
-                    ]
-                }),
+                config: gemini.config(client.user.username, gemini.tools(toolCtx, { googleSearch: true })),
                 history,
             });
 
@@ -103,9 +98,9 @@ module.exports = {
             if (imagePart) messageParts.push(imagePart);
             if (prompt) messageParts.push({ text: `[${speakerOf(msg)}]: ${prompt}` });
 
-            const result = await gemini.withRetry(() => chatSession.sendMessage({ message: messageParts }));
-
-            const { inputTokens, outputTokens, cost } = gemini.usageOf(result);
+            const { response: result, usage: { inputTokens, outputTokens, cost } } = await gemini.send(
+                chatSession, messageParts, toolCtx
+            );
             system.recordUsage(
                 msg.author.id, msg.author.username,
                 inputTokens, outputTokens, cost

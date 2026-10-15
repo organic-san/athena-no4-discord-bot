@@ -28,6 +28,12 @@ module.exports = () => {
         PRIMARY KEY (guild_id, channel_id)
     )`).run();
 
+    // 伺服器規則頻道（per-guild 一個，供 AI 讀取規則）
+    db.prepare(`CREATE TABLE IF NOT EXISTS gpt_rules_channel (
+        guild_id TEXT PRIMARY KEY,
+        channel_id TEXT
+    )`).run();
+
     // ── 社群安全與審核系統 ──
     // 檢舉紀錄（長期保存，僅存 metadata 與 Discord 物件 ID，不存訊息原文）
     db.prepare(`CREATE TABLE IF NOT EXISTS report (

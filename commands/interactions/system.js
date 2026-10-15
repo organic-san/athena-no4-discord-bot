@@ -105,23 +105,6 @@ module.exports = {
                 break;
             }
 
-            case "cmdupdate":
-                exec('node ester-slash.js', (error, stdout, stderr) => {
-                    if (error) {
-                        console.error(`執行 ester-slash.js 時發生錯誤: ${error.message}`);
-                        interaction.editReply(`執行 ester-slash.js 時發生錯誤: ${error.message}`).catch(console.error);
-                        return;
-                    }
-                    if (stderr) {
-                        console.error(`stderr: ${stderr}`);
-                        interaction.editReply(`錯誤: ${stderr}`).catch(console.error);
-                        return;
-                    }
-                    console.log(`stdout: ${stdout}`);
-                    interaction.editReply(`更新成功:\n\`\`\`${stdout}\`\`\``).catch(console.error);
-                });
-                break;
-
             case 'cmdupdateg':
                 exec('node create-slash-global.js', (error, stdout, stderr) => {
                     if (error) {

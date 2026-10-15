@@ -12,6 +12,12 @@
             "maxOutputTokens": 8192,
             "inputPricePerM": 0.75,
             "outputPricePerM": 3.75
+        },
+        "gemini-4-argon": {
+            "thinkingLevel": "LOW",
+            "maxOutputTokens": 8192,
+            "inputPricePerM": 2.00,
+            "outputPricePerM": 10.00
         }
     }
 }
