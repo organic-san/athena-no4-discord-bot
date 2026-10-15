@@ -42,6 +42,8 @@ client.once('clientReady', () => {
     require('./utility/backup').start();
     // 啟動心跳監測（保溫 + 逾時取證），並開始記錄 shard 生命週期事件
     require('./utility/heartbeat').start(client);
+    // 啟動日程公告輪詢（新公告 → 預告草稿送審核）
+    require('./utility/schedule').start(client);
 });
 
 const eventFiles = fs.readdirSync('./models').filter(file => file.endsWith('.js'));

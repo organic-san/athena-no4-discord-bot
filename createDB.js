@@ -28,6 +28,24 @@ module.exports = () => {
         PRIMARY KEY (guild_id, channel_id)
     )`).run();
 
+    // 日程預告：已看過的官方公告（revision 用於偵測修改）與待審核草稿
+    db.prepare(`CREATE TABLE IF NOT EXISTS schedule_seen (
+        source TEXT,
+        article_id TEXT,
+        revision TEXT,
+        PRIMARY KEY (source, article_id)
+    )`).run();
+    db.prepare(`CREATE TABLE IF NOT EXISTS schedule_draft (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        source TEXT,
+        data TEXT,
+        status TEXT,
+        created_at TEXT,
+        decided_by TEXT,
+        review_channel_id TEXT,
+        review_message_id TEXT
+    )`).run();
+
     // 伺服器規則頻道（per-guild 一個，供 AI 讀取規則）
     db.prepare(`CREATE TABLE IF NOT EXISTS gpt_rules_channel (
         guild_id TEXT PRIMARY KEY,

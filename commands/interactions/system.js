@@ -134,6 +134,8 @@ module.exports = {
                     "- eval <code>: eval program\n" +
                     "- pull: git pull (並重新載入 config/models.json)\n" +
                     "- model [name]: 查看／切換 Gemini 模型\n" +
+                    "- schedule test <tw|jp>: 以最新公告測試日程預告（不建立討論串、不發布）\n" +
+                    "- schedule poll: 立即檢查一次新公告\n" +
                     "- cmdupdate: cmd update\n" +
                     "- cmdupdateg: cmd update global\n" +
                     "- restart (r): restart bot";

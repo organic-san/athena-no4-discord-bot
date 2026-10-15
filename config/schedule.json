@@ -1,0 +1,24 @@
+{
+    "model": "gemini-4-argon",
+    "thinkingLevel": "LOW",
+    "maxOutputTokens": 32768,
+    "pollMinutes": 10,
+    "guildId": "1155756725987717172",
+    "reviewChannelId": "1155804189738406010",
+    "publishChannelId": "1156148847077249135",
+    "sources": {
+        "tw": { "label": "國際版", "notifyText": "@通知-國際版", "roleId": "1156252111626043493" },
+        "jp": { "label": "日版", "notifyText": "@通知-日版", "roleId": "1156252162184187975" }
+    },
+    "emojis": {
+        ":icon_revival:": "<:icon_revival:1275103983555575880>",
+        ":icon_limited:": "<:icon_limited:1275103554608173178>"
+    },
+    "forums": {
+        "total_assault": "1155769047783329852",
+        "grand_assault": "1155769047783329852",
+        "unlimit": "1222571983477276732",
+        "drill": "1210600346695499776",
+        "tactical": "1210180269001146438"
+    }
+}
