@@ -1,5 +1,5 @@
 ### athena no.4 Discord bot
-- chatgpt api access
+- gemini api access
 - server moderation
 - span detect
   

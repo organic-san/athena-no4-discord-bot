@@ -13,14 +13,22 @@ function describeModel(p) {
     return `${p.name}｜thinking ${p.thinkingLevel}｜輸出上限 ${p.maxOutputTokens}｜$${p.inputPricePerM} / $${p.outputPricePerM} 每百萬 token（輸入/輸出）`;
 }
 
-/** git pull 後重新讀取 config/models.json，回傳附加在輸出後的說明。 */
-function reloadModels() {
+/** git pull 後重新讀取 config/models.json 與 prompts/default.txt，回傳附加在輸出後的說明。 */
+function reloadAfterPull() {
+    const notes = [];
     try {
         modelConfig.reload();
-        return `\n模型設定已重新載入，目前：${modelConfig.current().name}`;
+        notes.push(`模型設定已重新載入，目前：${modelConfig.current().name}`);
     } catch (e) {
-        return `\n⚠️ config/models.json 載入失敗，沿用原設定：${e.message}`;
+        notes.push(`⚠️ config/models.json 載入失敗，沿用原設定：${e.message}`);
     }
+    try {
+        gemini.reloadPrompt();
+        notes.push('system prompt 已重新載入');
+    } catch (e) {
+        notes.push(`⚠️ prompts/default.txt 載入失敗，沿用原內容：${e.message}`);
+    }
+    return '\n' + notes.join('\n');
 }
 
 module.exports = {
@@ -66,7 +74,7 @@ module.exports = {
                         interaction.editReply(`執行失敗：\`\`\`${err}\`\`\``).catch(console.error);
                         return;
                     }
-                    const reloadNote = reloadModels();
+                    const reloadNote = reloadAfterPull();
                     if(stderr) {
                         console.error(`stderr: ${stderr}`);
                         interaction.editReply(`執行完成，輸出錯誤：\`\`\`${stderr}\`\`\`${reloadNote}`).catch(console.error);

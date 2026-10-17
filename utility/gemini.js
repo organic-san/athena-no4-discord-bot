@@ -17,7 +17,9 @@ const MAX_TOOL_ROUNDS = 3;
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-// system prompt 每則訊息都會用到，啟動後只讀一次，不在 event loop 上重複同步讀檔。
+const PROMPT_FILE = './prompts/default.txt';
+
+// system prompt 每則訊息都會用到，只在首次使用與 reloadPrompt() 時讀檔，不在 event loop 上重複同步讀檔。
 let promptTemplate = null;
 
 /** 取得錯誤的 HTTP 狀態碼；非 API 錯誤（如網路層失敗）回傳 null。 */
@@ -48,8 +50,15 @@ module.exports = {
 
     /** 取得填入機器人名稱後的 system prompt。 */
     systemPrompt(botName) {
-        if (promptTemplate === null) promptTemplate = fs.readFileSync('./prompts/default.txt', 'utf-8');
+        if (promptTemplate === null) promptTemplate = fs.readFileSync(PROMPT_FILE, 'utf-8');
         return promptTemplate.replaceAll('{botName}', botName);
+    },
+
+    /** 重新讀取 prompts/default.txt（git pull 後呼叫）。讀取失敗或內容為空時丟例外並保留原內容。 */
+    reloadPrompt() {
+        const text = fs.readFileSync(PROMPT_FILE, 'utf-8');
+        if (!text.trim()) throw new Error(`${PROMPT_FILE} 內容為空`);
+        promptTemplate = text;
     },
 
     /** 共用的 generation config；extra 用於各入口的差異（例如 tools）。 */
