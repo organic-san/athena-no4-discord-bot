@@ -368,6 +368,7 @@ function reviewButtons(draftId) {
     return [new Discord.ActionRowBuilder().addComponents(
         new Discord.ButtonBuilder().setCustomId(`sched:approve:${draftId}`).setLabel('發布').setEmoji('✅').setStyle(Discord.ButtonStyle.Success),
         new Discord.ButtonBuilder().setCustomId(`sched:export:${draftId}`).setLabel('建立討論串並輸出文字').setEmoji('📄').setStyle(Discord.ButtonStyle.Primary),
+        new Discord.ButtonBuilder().setCustomId(`sched:text:${draftId}`).setLabel('不建立討論串，只輸出文字').setEmoji('📋').setStyle(Discord.ButtonStyle.Primary),
         new Discord.ButtonBuilder().setCustomId(`sched:reject:${draftId}`).setLabel('不處理').setEmoji('❌').setStyle(Discord.ButtonStyle.Secondary),
     )];
 }
@@ -588,9 +589,10 @@ module.exports = {
     STATUS_LABEL,
 
     /**
-     * 處理草稿：建立討論串 → 填入連結，接著依 mode：
-     *   publish：發到公告頻道（換成表情與身分組提及），回傳 { postUrl, threads, warnings }
-     *   export：不發布，回傳 { text, coverFile, threads, warnings }；text 保留 schedule.md 的可貼上格式
+     * 處理草稿，依 mode：
+     *   publish：建立討論串 → 填入連結 → 發到公告頻道（換成表情與身分組提及），回傳 { postUrl, threads, warnings }
+     *   export：建立討論串 → 填入連結，不發布，回傳 { text, coverFile, threads, warnings }；text 保留 schedule.md 的可貼上格式
+     *   text：同 export 但不建立討論串，連結位置留空待補
      * 回傳 { already } 表示已被處理。失敗時丟出錯誤，err.created 為已建立的討論串（需人工清理）。
      */
     async materialize(client, draftId, userId, mode) {
@@ -608,7 +610,7 @@ module.exports = {
         try {
             const guild = await client.guilds.fetch(cfg.guildId);
             const links = {};
-            for (const t of draft.threads) {
+            for (const t of mode === 'text' ? [] : draft.threads) {
                 const forum = await guild.channels.fetch(t.forumId);
                 const files = [];
                 if (t.imageUrl) {
@@ -631,7 +633,7 @@ module.exports = {
                 catch (e) { warnings.push(`預告主視覺未附上（${e.message}）：${draft.coverImageUrl}`); }
             }
 
-            if (mode === 'export') {
+            if (mode === 'export' || mode === 'text') {
                 const text = draft.post.replace(/\{\{THREAD:([^}]+)\}\}/g, (m, key) => links[key] ?? '');
                 db.prepare(`UPDATE schedule_draft SET status = 'exported' WHERE id = ?`).run(draftId);
                 return { text, coverFile: coverFiles[0] ?? null, threads: created, warnings };

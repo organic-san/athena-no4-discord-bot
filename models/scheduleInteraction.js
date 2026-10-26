@@ -36,8 +36,8 @@ module.exports = {
                 return;
             }
 
-            if (action === 'approve' || action === 'export') {
-                const mode = action === 'approve' ? 'publish' : 'export';
+            const mode = { approve: 'publish', export: 'export', text: 'text' }[action];
+            if (mode) {
                 // 建立討論串、下載圖片可能超過 3 秒，先 ack。
                 await interaction.deferUpdate();
                 let res;
@@ -62,12 +62,14 @@ module.exports = {
                         `✅ 已由 <@${interaction.user.id}> 發布：${res.postUrl}（討論串 ${res.threads.length} 個）${warn}`));
                     return;
                 }
-                await interaction.editReply(withResult(interaction.message,
-                    `📄 已由 <@${interaction.user.id}> 建立討論串 ${res.threads.length} 個並輸出文字（未發布）${warn}`));
+                const done = mode === 'export'
+                    ? `建立討論串 ${res.threads.length} 個並輸出文字（未發布）`
+                    : '輸出文字（未建立討論串、未發布）';
+                await interaction.editReply(withResult(interaction.message, `📄 已由 <@${interaction.user.id}> ${done}${warn}`));
                 const files = [{ attachment: Buffer.from(res.text, 'utf-8'), name: `schedule-${draftId}.txt` }];
                 if (res.coverFile) files.push(res.coverFile);
                 await interaction.followUp({
-                    content: `📄 草稿 #${draftId} 的預告文字（討論串連結已填入）${res.coverFile ? '與主視覺圖' : ''}`,
+                    content: `📄 草稿 #${draftId} 的預告文字（${mode === 'export' ? '討論串連結已填入' : '討論串連結留空待補'}）${res.coverFile ? '與主視覺圖' : ''}`,
                     files,
                     allowedMentions: { parse: [] },
                 });

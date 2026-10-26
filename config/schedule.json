@@ -7,8 +7,8 @@
     "reviewChannelId": "1155804189738406010",
     "publishChannelId": "1156148847077249135",
     "sources": {
-        "tw": { "label": "國際版", "notifyText": "@通知-國際版", "roleId": "1156252111626043493" },
-        "jp": { "label": "日版", "notifyText": "@通知-日版", "roleId": "1156252162184187975" }
+        "tw": { "label": "國際版", "notifyText": "@通知-國際版", "roleId": "1156252162184187975" },
+        "jp": { "label": "日版", "notifyText": "@通知-日版", "roleId": "1156252111626043493" }
     },
     "emojis": {
         ":icon_revival:": "<:icon_revival:1275103983555575880>",
