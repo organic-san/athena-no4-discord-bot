@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const Discord = require('discord.js');
+const { createCanvas, loadImage } = require('canvas');
 const DB = require('./database.js');
 const gemini = require('./gemini.js');
 const fetcher = require('./newsFetcher.js');
@@ -9,6 +10,7 @@ const notify = require('./notify.js');
 // 日程預告自動化：輪詢官方公告 → 以 prompts/schedule.md 的規則交給模型整理 → 草稿送審核頻道
 // → 管理員按 ✅ 後才建立戰鬥討論串、填入連結並發布；按 ❌ 則不處理（由管理員手動發布）。
 // 設定在 config/schedule.json，規則與 prompt 每次產生時重新讀檔，/system pull 後即生效。
+// sources.<版本>.sendImages 開啟時，公告圖片也一併交給模型（見 imageParts）。
 // 依需求不計入 /costs 的使用量統計（費用由 Google 後台查看）。
 
 const CONFIG_FILE = './config/schedule.json';
@@ -22,6 +24,13 @@ const PAIR_AFTER_MS = 24 * HOUR;
 // 抓取連續失敗幾次才通知，避免網站短暫異常就洗版。
 const FAIL_ALERT_AFTER = 3;
 const MSG_LIMIT = 2000;
+
+// 公告圖片交給模型閱讀（日版常有只寫在圖裡的資訊）。Gemini 4 每張圖依解析度固定計 token（high = 1120），
+// 縮圖不影響費用，只是為了讓整個請求壓在 inline 上限 20MB 內：原圖單張可達 9MB，縮到寬 1600 的 JPEG 約 250KB。
+const IMAGE_MAX_WIDTH = 1600;
+const IMAGE_MAX_DOWNLOAD = 30 * 1024 * 1024;
+const IMAGE_BUDGET = 15 * 1024 * 1024; // base64 後的總量上限，保留空間給文字
+const IMAGE_CONCURRENCY = 4;
 
 const CATEGORY = {
     total_assault: { label: '總力戰', name: '總力戰' },
@@ -210,12 +219,64 @@ function findTag(tags, name) {
     return tags.find(t => t.name === name) ?? tags.find(t => norm(t.name) === norm(name));
 }
 
-/** 呼叫模型整理公告，回傳解析後的 JSON。 */
-async function generate(cfg, userText) {
+const GIF = Symbol('gif');
+
+/**
+ * 下載一張公告圖片並縮成給模型看的 JPEG（base64）。
+ * GIF（家具互動動畫等，單張可達 40MB，不含日程資訊）回傳 GIF 標記不送；無法讀取時回傳 null。
+ */
+async function imageForModel(url) {
+    if (/\.gif$/i.test(new URL(url).pathname)) return GIF;
+    try {
+        const res = await fetch(url, { signal: AbortSignal.timeout(30 * 1000) });
+        if (!res.ok) return null;
+        if (/gif/i.test(res.headers.get('content-type') || '')) return GIF;
+        if (Number(res.headers.get('content-length')) > IMAGE_MAX_DOWNLOAD) return null;
+        const img = await loadImage(Buffer.from(await res.arrayBuffer()));
+        const scale = Math.min(1, IMAGE_MAX_WIDTH / img.width);
+        const canvas = createCanvas(Math.round(img.width * scale), Math.round(img.height * scale));
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#fff'; // 透明 PNG 轉 JPEG 時避免變成黑底
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        return canvas.toBuffer('image/jpeg', { quality: 0.85 }).toString('base64');
+    } catch (e) {
+        console.warn(`[schedule] 圖片讀取失敗：${url}（${e.message}）`);
+        return null;
+    }
+}
+
+/**
+ * 把公告圖片轉成模型輸入：每張圖前加上與本文相同的 [IMG:n] 標記，讓模型能對應圖片位置與編號。
+ * 回傳 { parts, sent, missed }；missed 為讀取失敗或超出總量而沒送出的張數（不含刻意略過的 GIF）。
+ */
+async function imageParts(images, resolution) {
+    const level = `MEDIA_RESOLUTION_${String(resolution || 'high').toUpperCase()}`;
+    const data = new Array(images.length).fill(null);
+    for (let i = 0; i < images.length; i += IMAGE_CONCURRENCY) {
+        const batch = images.slice(i, i + IMAGE_CONCURRENCY);
+        (await Promise.all(batch.map(imageForModel))).forEach((d, j) => { data[i + j] = d; });
+    }
+
+    const parts = [];
+    let total = 0, sent = 0, gifs = 0;
+    data.forEach((d, i) => {
+        if (d === GIF) { gifs++; return; }
+        if (!d || total + d.length > IMAGE_BUDGET) return;
+        total += d.length;
+        sent++;
+        parts.push({ text: `[IMG:${i + 1}]` }, { inlineData: { mimeType: 'image/jpeg', data: d }, mediaResolution: { level } });
+    });
+    console.log(`[schedule] 附上圖片 ${sent}/${images.length} 張（略過 GIF ${gifs} 張），約 ${(total / 1048576).toFixed(1)} MB`);
+    return { parts, sent, missed: images.length - sent - gifs };
+}
+
+/** 呼叫模型整理公告，回傳解析後的 JSON。extraParts 接在文字之後（例如公告圖片）。 */
+async function generate(cfg, userText, extraParts = []) {
     const systemInstruction = fs.readFileSync(RULES_FILE, 'utf-8') + '\n\n' + fs.readFileSync(ADAPTER_FILE, 'utf-8');
     const response = await gemini.withRetry(() => gemini.ai.models.generateContent({
         model: cfg.model,
-        contents: [{ role: 'user', parts: [{ text: userText }] }],
+        contents: [{ role: 'user', parts: [{ text: userText }, ...extraParts] }],
         config: {
             systemInstruction,
             maxOutputTokens: cfg.maxOutputTokens,
@@ -262,6 +323,10 @@ async function buildDraft(client, source, articles) {
 
     const nextSeason = nextNumber(forums.get(cfg.forums.tactical)?.titles ?? [], seasonRegex(label));
 
+    const pics = cfg.sources[source].sendImages
+        ? await imageParts(images, cfg.imageResolution)
+        : { parts: [], sent: 0, missed: 0 };
+
     const result = await generate(cfg, [
         `伺服器：${label}`,
         `今天日期：${fmtTime(Date.now()).slice(0, 10)}`,
@@ -274,9 +339,11 @@ async function buildDraft(client, source, articles) {
         '',
         '## 公告',
         docs.join('\n\n'),
-    ].join('\n'));
+        ...(pics.sent ? ['', `## 公告圖片`, `以下附上公告中的圖片（共 ${pics.sent} 張，GIF 除外），每張前面標有對應的 [IMG:n]。`] : []),
+    ].join('\n'), pics.parts);
 
     const notes = [...(result.notes ?? [])];
+    if (pics.missed) notes.push(`有 ${pics.missed} 張公告圖片讀取失敗或超出總量，沒有交給模型，其中的資訊可能遺漏`);
     const threads = [];
     const assigned = new Map(); // 同一份草稿有兩個同類項目時，期數接續遞增
 
